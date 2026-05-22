@@ -29,22 +29,10 @@ export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
 
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      message: "Welcome to Learnova! 🎉",
-      time: "Just now",
-      read: false,
-    },
-    {
-      id: 2,
-      message: "Complete your profile to get started.",
-      time: "2 min ago",
-      read: false,
-    },
-  ]);
+  
+const [notifications, setNotifications] = useState([]);
 
-  const [unreadCount, setUnreadCount] = useState(2);
+const [unreadCount, setUnreadCount] = useState(0);
 
   const { user, userProfile, signOut, isAuthenticated } =
     useAuthContext();
@@ -271,6 +259,7 @@ export function Navbar() {
   );
 
   const handleImageError = (e) => {
+
     const img = e.target;
 
     const fallback =
@@ -414,30 +403,34 @@ export function Navbar() {
                             </button>
                           )}
                         </div>
+<div className="max-h-72 overflow-y-auto">
+  {notifications.length === 0 ? (
+    <div className="p-6 text-center">
+      <Bell className="h-10 w-10 mx-auto text-white/30 mb-3" />
+      <p className="text-white/50 text-sm">
+        No notifications available
+      </p>
+    </div>
+  ) : (
+    notifications.map((n) => (
+      <div
+        key={n.id}
+        onClick={() => markAsRead(n.id)}
+        className={`p-4 border-b border-white/5 cursor-pointer hover:bg-white/5 ${
+          !n.read ? "bg-accent/5" : ""
+        }`}
+      >
+        <p className="text-sm text-white">
+          {n.message}
+        </p>
 
-                        <div className="max-h-72 overflow-y-auto">
-                          {notifications.map((n) => (
-                            <div
-                              key={n.id}
-                              onClick={() =>
-                                markAsRead(n.id)
-                              }
-                              className={`p-4 border-b border-white/5 cursor-pointer hover:bg-white/5 ${
-                                !n.read
-                                  ? "bg-accent/5"
-                                  : ""
-                              }`}
-                            >
-                              <p className="text-sm text-white">
-                                {n.message}
-                              </p>
-
-                              <p className="text-xs text-white/40 mt-1">
-                                {n.time}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
+        <p className="text-xs text-white/40 mt-1">
+          {n.time}
+        </p>
+      </div>
+    ))
+  )}
+</div>
                       </div>
                     )}
                   </div>
