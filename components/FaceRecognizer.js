@@ -197,6 +197,7 @@ export default function FaceRecognizer({ authUser }) {
       await Promise.all(
         labels.map(async (student) => {
           try {
+            if (!student.hasImage) return null;
             const imgUrl = `/api/images?id=${student._id}`;
             const img = await faceapi.fetchImage(imgUrl);
             const detection = await faceapi
