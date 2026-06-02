@@ -52,6 +52,7 @@ const AUTH_RATE_LIMITED_PATHS = [
 const PUBLIC_API_PATHS = [
   "/api/auth/csrf",
   "/api/auth/reset-password",
+  "/api/health",
 ];
 
 function isAuthRoute(pathname) {
