@@ -286,7 +286,8 @@ async function generateBotResponse(
   userMessage,
   currentCategory,
   idToken,
-  updatedMessages = []
+  updatedMessages = [],
+  user = null
 ) {
   const lower = userMessage.toLowerCase();
 
@@ -738,6 +739,7 @@ export default function LearnovaChatbot() {
         if (!user) {
           botText = "[**Please sign in**](/auth) to use the AI chatbot.";
         } else {
+          idToken = await user.getIdToken();
           // 🛠️ STEP 2 INTERCEPT: Check text signature against local action handlers first!
           const actionResponse = await parseUserIntent(text, {
             instituteId: userProfile?.instituteId,
@@ -749,19 +751,14 @@ export default function LearnovaChatbot() {
             botText = `🤖 **Action Handler Initiated Successfully**\n\n\`\`\`json\n${JSON.stringify(parsedResult, null, 2)}\n\`\`\``;
           } else {
             // No local action regex matched. Fall through safely to normal processing pipeline
-            const idToken = await user.getIdToken();
             botText = await generateBotResponse(
               text,
               currentCategory,
               idToken,
-              [...messages, userMsg]
+              [...messages, userMsg],
+              user
             );
           }
-          idToken = await user.getIdToken();
-          botText = await generateBotResponse(text, currentCategory, idToken, [
-            ...messages,
-            userMsg,
-          ]);
         }
       } catch {
         botText = `I apologize for the technical difficulty. Our team is here to help:\n\n📧 **Email:** ${CONTACT_INFO.email}\n📞 **Phone:** ${CONTACT_INFO.phone}\n🎯 **Live Demo:** ${CONTACT_INFO.demo}`;
