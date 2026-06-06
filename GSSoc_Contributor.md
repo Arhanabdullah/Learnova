@@ -141,16 +141,16 @@ Fetch latest updates:
 git fetch upstream
 ```
 
-Switch to main branch:
+Switch to master branch:
 
 ```bash
-git checkout main
+git checkout master
 ```
 
 Merge latest changes:
 
 ```bash
-git merge upstream/main
+git merge upstream/master
 ```
 
 Return to your branch:
@@ -162,7 +162,7 @@ git checkout docs/add-gssoc-guide
 Rebase if necessary:
 
 ```bash
-git rebase main
+git rebase master
 ```
 
 ---
@@ -186,7 +186,7 @@ git push origin docs/add-gssoc-guide
 3. Select:
 
    * Base Repository: Premshaw23/Learnova
-   * Base Branch: main
+   * Base Branch: master
    * Head Repository: your fork
    * Compare Branch: your feature branch
 
@@ -240,9 +240,9 @@ Regularly sync your fork:
 
 ```bash
 git fetch upstream
-git checkout main
-git merge upstream/main
-git push origin main
+git checkout master
+git merge upstream/master
+git push origin master
 ```
 
 ---
