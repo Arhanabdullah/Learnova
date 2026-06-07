@@ -3,9 +3,8 @@ import * as jose from "jose";
 import { Redis } from "@upstash/redis";
 import { validateCsrfOriginAndReferer, validateCsrfRequest } from "@/lib/csrf";
 
-let redisClient;
-
 function getRedisClient() {
+  let redisClient;
   if (
     !redisClient &&
     process.env.UPSTASH_REDIS_REST_URL &&
@@ -52,6 +51,63 @@ function getRedis() {
 // Dev-only in-memory fallback (never used in production)
 const devRateLimitMap = new Map();
 
+/**
+ * In-memory rate limiting fallback for local development.
+ * Prevents excessive requests to authentication endpoints
+ * when Redis is unavailable.
+ */
+
+// Rate limit configuration for local development fallback
+let lastCleanupTime = Date.now();
+
+/**
+ * Simple in-memory rate limiter used when Redis is unavailable.
+ * Limits requests per IP and route within a fixed time window.
+ */
+async function rateLimit(ip, pathname) {
+  const now = Date.now();
+  const key = `${ip}_${pathname}`;
+  let entry = devRateLimitMap.get(key);
+
+  // Create new entry if none exists or previous window expired
+  if (!entry || entry.resetTime <= now) {
+    entry = {
+      count: 0,
+      resetTime: now + RATE_LIMIT_WINDOW_MS,
+    };
+  }
+  entry.count += 1;
+  devRateLimitMap.set(key, entry);
+  const remaining = Math.max(0, RATE_LIMIT_MAX - entry.count);
+
+  return {
+    allowed: entry.count <= RATE_LIMIT_MAX,
+    remaining,
+    retryAfter: Math.ceil((entry.resetTime - now) / 1000),
+  };
+}
+
+/**
+ * Removes expired rate-limit entries from the in-memory store.
+ * This prevents the map from growing indefinitely during development.
+ */
+function cleanupRateLimitMap() {
+  const now = Date.now();
+
+  // Avoid running cleanup too frequently
+  if (now - lastCleanupTime < 60 * 1000) {
+    return;
+  }
+
+  for (const [key, value] of devRateLimitMap.entries()) {
+    if (value.resetTime <= now) {
+      devRateLimitMap.delete(key);
+    }
+  }
+
+  lastCleanupTime = now;
+}
+
 const AUTH_RATE_LIMITED_PATHS = [
   "/api/auth/login",
   "/api/auth/signup",
@@ -61,6 +117,22 @@ const AUTH_RATE_LIMITED_PATHS = [
   "/api/auth/verify-email",
   "/api/auth/verify-otp",
 ];
+
+/**
+ * Checks whether a request path belongs to an authentication endpoint
+ * that should be protected by rate limiting.
+ *
+ * Examples:
+ * - /api/auth/login
+ * - /api/auth/signup
+ * - /api/auth/verify-otp/callback
+ */
+
+function isAuthRoute(pathname) {
+  return AUTH_RATE_LIMITED_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`)
+  );
+}
 
 const PUBLIC_API_PATHS = [
   "/api/auth/csrf",
@@ -364,171 +436,172 @@ export async function middleware(request) {
   }
 
   if (pathname.startsWith("/api/") && isUnsafeMethod) {
-  if (isTokenValid && pathname.startsWith("/api/")) {
-    const sessionId =
-      request.cookies.get("sessionId")?.value ||
-      request.headers.get("x-session-id");
-    if (sessionId) {
-      try {
-        const redis = getRedisClient();
-        if (redis) {
-          const exists = await redis.exists(`session:${sessionId}`);
-          if (exists !== 1) {
-            return NextResponse.json(
-              { error: "Session expired or terminated concurrently" },
-              { status: 401 }
-            );
+    if (isTokenValid && pathname.startsWith("/api/")) {
+      const sessionId =
+        request.cookies.get("sessionId")?.value ||
+        request.headers.get("x-session-id");
+      if (sessionId) {
+        try {
+          const redis = getRedisClient();
+          if (redis) {
+            const exists = await redis.exists(`session:${sessionId}`);
+            if (exists !== 1) {
+              return NextResponse.json(
+                { error: "Session expired or terminated concurrently" },
+                { status: 401 }
+              );
+            }
           }
+        } catch {
+          // Redis unavailable — continue without session validation
         }
-      } catch {
-        // Redis unavailable — continue without session validation
       }
     }
-  }
 
-  const tokenFromCookie = request.cookies.get("authToken")?.value || null;
-  if (pathname.startsWith("/api/") && isUnsafeMethod && tokenFromCookie) {
-    try {
-      validateCsrfOriginAndReferer(request);
-      validateCsrfRequest(request);
-    } catch (error) {
-      return NextResponse.json(
-        { error: error.message || "Forbidden: invalid CSRF request" },
-        { status: error.statusCode || 403 }
-      );
+    const tokenFromCookie = request.cookies.get("authToken")?.value || null;
+    if (pathname.startsWith("/api/") && isUnsafeMethod && tokenFromCookie) {
+      try {
+        validateCsrfOriginAndReferer(request);
+        validateCsrfRequest(request);
+      } catch (error) {
+        return NextResponse.json(
+          { error: error.message || "Forbidden: invalid CSRF request" },
+          { status: error.statusCode || 403 }
+        );
+      }
     }
-  }
 
-  const protectedDashboards = [
-    {
-      prefix: "/student",
-      apiPrefix: "/api/student",
-      role: "student",
-      defaultPath: "/student/dashboard",
-    },
-    {
-      prefix: "/teacher",
-      apiPrefix: "/api/teacher",
-      role: "teacher",
-      defaultPath: "/teacher/dashboard",
-    },
-    {
-      prefix: "/admin",
-      apiPrefix: "/api/admin",
-      role: "admin",
-      defaultPath: "/admin/dashboard",
-    },
-    {
-      prefix: "/institute",
-      apiPrefix: "/api/institute",
-      role: "institute",
-      defaultPath: "/institute/dashboard",
-    },
-    {
-      prefix: "/parent",
-      apiPrefix: "/api/parent",
-      role: "parent",
-      defaultPath: "/parent/dashboard",
-    },
-  ];
+    const protectedDashboards = [
+      {
+        prefix: "/student",
+        apiPrefix: "/api/student",
+        role: "student",
+        defaultPath: "/student/dashboard",
+      },
+      {
+        prefix: "/teacher",
+        apiPrefix: "/api/teacher",
+        role: "teacher",
+        defaultPath: "/teacher/dashboard",
+      },
+      {
+        prefix: "/admin",
+        apiPrefix: "/api/admin",
+        role: "admin",
+        defaultPath: "/admin/dashboard",
+      },
+      {
+        prefix: "/institute",
+        apiPrefix: "/api/institute",
+        role: "institute",
+        defaultPath: "/institute/dashboard",
+      },
+      {
+        prefix: "/parent",
+        apiPrefix: "/api/parent",
+        role: "parent",
+        defaultPath: "/parent/dashboard",
+      },
+    ];
 
-  const matchedDashboard = protectedDashboards.find(
-    (dashboard) =>
-      pathname.startsWith(dashboard.prefix) ||
-      (dashboard.apiPrefix && pathname.startsWith(dashboard.apiPrefix))
-  );
+    const matchedDashboard = protectedDashboards.find(
+      (dashboard) =>
+        pathname.startsWith(dashboard.prefix) ||
+        (dashboard.apiPrefix && pathname.startsWith(dashboard.apiPrefix))
+    );
 
-  if (
-    pathname.startsWith("/api/") &&
-    pathname !== "/api/check-groq-config" &&
-    !PUBLIC_API_PATHS.some((path) => pathname.startsWith(path))
-  ) {
-    if (!matchedDashboard) {
+    if (
+      pathname.startsWith("/api/") &&
+      pathname !== "/api/check-groq-config" &&
+      !PUBLIC_API_PATHS.some((path) => pathname.startsWith(path))
+    ) {
+      if (!matchedDashboard) {
+        if (!isTokenValid) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        if (!isEmailVerified) {
+          return NextResponse.json(
+            { error: "Forbidden: Email not verified" },
+            { status: 403 }
+          );
+        }
+      }
+    }
+
+    if (matchedDashboard) {
       if (!isTokenValid) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        if (pathname.startsWith("/api/")) {
+          return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+        return NextResponse.redirect(new URL("/auth", request.url));
       }
       if (!isEmailVerified) {
-        return NextResponse.json(
-          { error: "Forbidden: Email not verified" },
-          { status: 403 }
+        if (pathname.startsWith("/api/")) {
+          return NextResponse.json(
+            { error: "Forbidden: Email not verified" },
+            { status: 403 }
+          );
+        }
+        return NextResponse.redirect(new URL("/verify", request.url));
+      }
+      if (userRole !== matchedDashboard.role) {
+        if (pathname.startsWith("/api/")) {
+          return NextResponse.json(
+            { error: "Forbidden: Role mismatch" },
+            { status: 403 }
+          );
+        }
+        const correctDashboard = protectedDashboards.find(
+          (d) => d.role === userRole
         );
+        const redirectTarget = correctDashboard
+          ? correctDashboard.defaultPath
+          : "/profile";
+        return NextResponse.redirect(new URL(redirectTarget, request.url));
       }
     }
-  }
 
-  if (matchedDashboard) {
-    if (!isTokenValid) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return NextResponse.redirect(new URL("/auth", request.url));
-    }
-    if (!isEmailVerified) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json(
-          { error: "Forbidden: Email not verified" },
-          { status: 403 }
-        );
-      }
-      return NextResponse.redirect(new URL("/verify", request.url));
-    }
-    if (userRole !== matchedDashboard.role) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json(
-          { error: "Forbidden: Role mismatch" },
-          { status: 403 }
-        );
-      }
-      const correctDashboard = protectedDashboards.find(
-        (d) => d.role === userRole
-      );
-      const redirectTarget = correctDashboard
-        ? correctDashboard.defaultPath
-        : "/profile";
-      return NextResponse.redirect(new URL(redirectTarget, request.url));
-    }
-  }
-
-  const generalProtectedRoutes = ["/profile", "/settings"];
-  const isGeneralProtected = generalProtectedRoutes.some((route) =>
-    pathname.startsWith(route)
-  );
-
-  if (isGeneralProtected) {
-    if (!isTokenValid) {
-      return NextResponse.redirect(new URL("/auth", request.url));
-    }
-    if (!isEmailVerified) {
-      return NextResponse.redirect(new URL("/verify", request.url));
-    }
-  }
-
-  if (pathname.startsWith("/verify")) {
-    if (!isTokenValid) {
-      return NextResponse.redirect(new URL("/auth", request.url));
-    }
-    if (isEmailVerified) {
-      const correctDashboard = protectedDashboards.find(
-        (d) => d.role === userRole
-      );
-      const redirectTarget = correctDashboard
-        ? correctDashboard.defaultPath
-        : "/profile";
-      return NextResponse.redirect(new URL(redirectTarget, request.url));
-    }
-  }
-
-  if (pathname === "/auth" && isTokenValid && isEmailVerified && userRole) {
-    const correctDashboard = protectedDashboards.find(
-      (d) => d.role === userRole
+    const generalProtectedRoutes = ["/profile", "/settings"];
+    const isGeneralProtected = generalProtectedRoutes.some((route) =>
+      pathname.startsWith(route)
     );
-    if (correctDashboard) {
-      return NextResponse.redirect(
-        new URL(correctDashboard.defaultPath, request.url)
-      );
-    }
-  }
 
+    if (isGeneralProtected) {
+      if (!isTokenValid) {
+        return NextResponse.redirect(new URL("/auth", request.url));
+      }
+      if (!isEmailVerified) {
+        return NextResponse.redirect(new URL("/verify", request.url));
+      }
+    }
+
+    if (pathname.startsWith("/verify")) {
+      if (!isTokenValid) {
+        return NextResponse.redirect(new URL("/auth", request.url));
+      }
+      if (isEmailVerified) {
+        const correctDashboard = protectedDashboards.find(
+          (d) => d.role === userRole
+        );
+        const redirectTarget = correctDashboard
+          ? correctDashboard.defaultPath
+          : "/profile";
+        return NextResponse.redirect(new URL(redirectTarget, request.url));
+      }
+    }
+
+    if (pathname === "/auth" && isTokenValid && isEmailVerified && userRole) {
+      const correctDashboard = protectedDashboards.find(
+        (d) => d.role === userRole
+      );
+      if (correctDashboard) {
+        return NextResponse.redirect(
+          new URL(correctDashboard.defaultPath, request.url)
+        );
+      }
+    }
+
+  }
   const isPage =
     !pathname.startsWith("/_next") &&
     !pathname.startsWith("/api") &&
@@ -547,17 +620,16 @@ export async function middleware(request) {
     );
     response.headers.set("X-XSS-Protection", "1; mode=block");
   }
-
   return response;
 }
-
-// Exported for unit testing (in-memory fallback behavior)
-export { isAuthRoute, rateLimit, cleanupRateLimitMap, devRateLimitMap, resetForTest };
 
 // Test helper to control cleanup timer
 function resetForTest(now) {
   lastCleanupTime = now;
 }
+
+// Exported for unit testing (in-memory fallback behavior)
+export { isAuthRoute, rateLimit, cleanupRateLimitMap, devRateLimitMap, resetForTest };
 
 export const config = {
   matcher: [

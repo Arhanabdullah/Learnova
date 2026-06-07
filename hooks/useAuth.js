@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { auth, db } from "@/lib/firebaseConfig";
 import { onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
+import { isMounted } from "../hooks/useIsMounted";
 
 const setCookie = (name, value, days = 7) => {
   if (typeof window !== "undefined") {
