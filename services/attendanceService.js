@@ -11,12 +11,33 @@ import {
 import { auth, db } from "@/lib/firebaseConfig";
 
 import { recalculateAttendanceRate } from "./statsService";
-import { saveToOutbox } from "@/lib/offlineStore";
-import { registerBackgroundSync } from "@/lib/syncService";
+import {
+  handleOfflineRequest,
+  triggerOfflineSync,
+} from "@/utils/offlineRequestHandler";
 import { getTodayKeyLocal } from "@/lib/dateUtils";
+import { queueOfflineAttendance, syncOfflineQueue } from "./offlineSyncQueue";
 
 function getTodayKey() {
   return getTodayKeyLocal();
+}
+
+function unwrapApiData(payload) {
+  return payload?.success === true && payload?.data !== undefined
+    ? payload.data
+    : payload;
+}
+
+function getApiErrorMessage(payload, fallback) {
+  if (typeof payload?.error === "string") {
+    return payload.error;
+  }
+
+  if (payload?.error?.message) {
+    return payload.error.message;
+  }
+
+  return payload?.message || fallback;
 }
 
 /**
@@ -61,32 +82,9 @@ export async function recordAttendance({
 
   const todayKey = getTodayKey();
 
-  const docRef = doc(
-    db,
-    "attendance_records",
-    `${userId}_${todayKey}`
-  );
+  const docRef = doc(db, "attendance_records", `${userId}_${todayKey}`);
 
-  // OFFLINE MODE
-  if (typeof window !== "undefined" && !navigator.onLine) {
-    console.warn("Device is offline. Queuing attendance locally.");
-
-    await saveToOutbox({
-      userId,
-      studentName,
-      email,
-      confidenceScore: confidenceScore ?? 0,
-      date: todayKey,
-    });
-
-    await registerBackgroundSync();
-
-    return {
-      alreadyRecorded: false,
-      newRate: null,
-      queuedOffline: true,
-    };
-  }
+  // OFFLINE MODE check removed. Workbox Background Sync handles it automatically.
 
   // DUPLICATE CHECK
   const existingDoc = await getDoc(docRef);
@@ -103,42 +101,77 @@ export async function recordAttendance({
     throw new Error("Authentication token unavailable. Please sign in again.");
   }
 
-  const response = await fetch("/api/attendance/record", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      userId,
-      studentName,
-      email,
-      confidenceScore: confidenceScore ?? 0,
-      date: todayKey,
-    }),
-  });
+  let response;
+  try {
+    if (!navigator.onLine) {
+      console.log("[AttendanceService] Device is offline. Queuing attendance in IndexedDB.");
+      await queueOfflineAttendance({
+        userId,
+        studentName,
+        email,
+        confidenceScore: confidenceScore ?? 0,
+        date: todayKey,
+        // Save the token so background sync can use it if needed, or re-fetch it
+      });
+      return {
+        alreadyRecorded: false,
+        newRate: null,
+        queuedOffline: true,
+      };
+    }
+
+    response = await fetch("/api/attendance/record", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        userId,
+        studentName,
+        email,
+        confidenceScore: confidenceScore ?? 0,
+        date: todayKey,
+      }),
+    });
+  } catch (error) {
+    if (error.message.includes("Failed to fetch") || error.name === "TypeError") {
+      console.warn("Network error during attendance submission. Queuing to IndexedDB.");
+      await queueOfflineAttendance({
+        userId,
+        studentName,
+        email,
+        confidenceScore: confidenceScore ?? 0,
+        date: todayKey,
+      });
+      return {
+        alreadyRecorded: false,
+        newRate: null,
+        queuedOffline: true,
+      };
+    }
+    throw error;
+  }
 
   if (!response.ok) {
-    let errorMessage =
-      "Failed to record attendance securely on the server.";
+    let errorMessage = "Failed to record attendance securely on the server.";
 
     try {
       const errorData = await response.json();
-
-      if (errorData?.message) {
-        errorMessage = errorData.message;
-      }
+      errorMessage = getApiErrorMessage(errorData, errorMessage);
     } catch {
-    // Ignore invalid JSON responses
+      // Ignore invalid JSON responses
     }
 
     throw new Error(errorMessage);
   }
 
-  const data = await response.json();
+  const data = unwrapApiData(await response.json());
   const isAlreadyRecorded = !!(data && data.alreadyRecorded);
 
-  const newRate = isAlreadyRecorded ? null : await recalculateAttendanceRate(userId);
+  const newRate = isAlreadyRecorded
+    ? null
+    : await recalculateAttendanceRate(userId);
 
   return {
     alreadyRecorded: isAlreadyRecorded,
