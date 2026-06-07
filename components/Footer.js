@@ -31,7 +31,7 @@ function FooterLink({ href, children, external = false }) {
       <LinkComponent
         href={href}
         {...externalProps}
-        className="group flex items-center gap-2 text-sm text-slate-300 transition-colors duration-200 ease-out hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-sm"
+        className="group flex items-center wrap-break-word gap-2 text-sm text-slate-300 transition-colors duration-200 ease-out hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 rounded-sm"
       >
         <span className="relative">
           {children}
@@ -223,19 +223,19 @@ export default function Footer() {
           {/* Contact Column */}
           <div className="space-y-5">
             <h3 className="text-xs font-semibold uppercase tracking-[0.28em] text-white/90 sm:text-sm">Contact</h3>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300 space-y-2 sm:rounded-2xl">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300 space-y-2 sm:rounded-2xl wrap-break-words overflow-hidden">
               <p>
                 Email:{" "}
                 <a
                   href={`mailto:${CONTACT_INFO.email}`}
-                  className="hover:underline hover:text-blue-500 transition-colors"
+                  className="break-all hover:underline hover:text-blue-500 transition-colors"
                 >
                   {CONTACT_INFO.email}
                 </a>
               </p>
               <p>Phone: {CONTACT_INFO.phone}</p>
               <Link href="/contact" className="inline-flex items-center gap-1 text-purple-400 hover:underline">
-                Get in touch <ExternalLink size={11}/>
+                Get in touch <ExternalLink size={11} />
               </Link>
             </div>
             <div className="rounded-xl border border-white/10 bg-gradient-to-br from-fuchsia-500/10 via-transparent to-cyan-500/10 p-4 sm:rounded-2xl">

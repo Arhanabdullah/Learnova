@@ -6,8 +6,7 @@ import OfflineSyncTracker from '@/components/OfflineSyncTracker';
 import { useTheme } from "next-themes";
 import { translations } from "@/constants/translations";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-
-import { useState } from "react";
+//Removed duplicate imports of useState and useEffect
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 
