@@ -36,8 +36,6 @@ const CLOCK_TOLERANCE_SECONDS = 60;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX = 5;
 
-let redisClient;
-
 function getRedis() {
   if (!redisClient) {
     redisClient = new Redis({
@@ -107,6 +105,24 @@ function cleanupRateLimitMap() {
 
   lastCleanupTime = now;
 }
+
+/**
+ * In-memory rate limiting fallback for local development.
+ * Prevents excessive requests to authentication endpoints
+ * when Redis is unavailable.
+ */
+
+
+/**
+ * Simple in-memory rate limiter used when Redis is unavailable.
+ * Limits requests per IP and route within a fixed time window.
+ */
+
+
+/**
+ * Removes expired rate-limit entries from the in-memory store.
+ * This prevents the map from growing indefinitely during development.
+ */
 
 const AUTH_RATE_LIMITED_PATHS = [
   "/api/auth/login",
@@ -358,6 +374,40 @@ async function verifyIdToken(token) {
   }
 }
 
+// ─── RBAC enforcement ────────────────────────────────────────────────────────
+
+function enforceApiRbac(pathname, isTokenValid, isEmailVerified, userRole) {
+  const rule = getApiRouteRule(pathname);
+
+  if (!rule) {
+    // Not an API route — no RBAC enforcement
+    return null;
+  }
+
+  if (rule.public) {
+    return null;
+  }
+
+  if (!isTokenValid) {
+    return { error: "Unauthorized", status: 401 };
+  }
+
+  if (!isEmailVerified) {
+    return { error: "Forbidden: Email not verified", status: 403 };
+  }
+
+  if (rule.roles && rule.roles.length > 0) {
+    if (!userRole) {
+      return { error: "Forbidden: No role assigned", status: 403 };
+    }
+    if (!rule.roles.includes(userRole)) {
+      return { error: "Forbidden: Role mismatch", status: 403 };
+    }
+  }
+
+  return null;
+}
+
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
 export async function middleware(request) {
@@ -436,6 +486,27 @@ export async function middleware(request) {
   }
 
   if (pathname.startsWith("/api/") && isUnsafeMethod) {
+    if (isTokenValid && pathname.startsWith("/api/")) {
+      const sessionId =
+        request.cookies.get("sessionId")?.value ||
+        request.headers.get("x-session-id");
+      if (sessionId) {
+        try {
+          const redis = getRedisClient();
+          if (redis) {
+            const exists = await redis.exists(`session:${sessionId}`);
+            if (exists !== 1) {
+              return NextResponse.json(
+                { error: "Session expired or terminated concurrently" },
+                { status: 401 }
+              );
+            }
+          }
+        } catch {
+          // Redis unavailable — continue without session validation
+        }
+      }
+    }
     if (isTokenValid && pathname.startsWith("/api/")) {
       const sessionId =
         request.cookies.get("sessionId")?.value ||
