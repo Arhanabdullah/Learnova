@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import * as jose from "jose";
-import { Redis } from "@upstash/redis";
+import { getRedis } from "@/lib/redis";
 import { validateCsrfOriginAndReferer, validateCsrfRequest } from "@/lib/csrf";
 
 function getRedisClient() {
@@ -17,6 +17,7 @@ function getRedisClient() {
   }
   return redisClient;
 }
+import getApiRouteRule from "@/lib/rbac-policy";
 
 const FIREBASE_PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 const FIREBASE_AUTH_DOMAIN = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
@@ -339,6 +340,7 @@ async function verifyIdToken(token) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken: token }),
+        signal: AbortSignal.timeout(5000),
       }
     );
 
@@ -486,6 +488,20 @@ export async function middleware(request) {
   }
 
   if (pathname.startsWith("/api/") && isUnsafeMethod) {
+  if (isTokenValid && pathname.startsWith("/api/")) {
+    const sessionId =
+      request.cookies.get("sessionId")?.value ||
+      request.headers.get("x-session-id");
+    if (sessionId) {
+      try {
+        const redis = getRedis();
+        if (redis) {
+          const exists = await redis.exists(`session:${sessionId}`);
+          if (exists !== 1) {
+            return NextResponse.json(
+              { error: "Session expired or terminated concurrently" },
+              { status: 401 }
+            );
     if (isTokenValid && pathname.startsWith("/api/")) {
       const sessionId =
         request.cookies.get("sessionId")?.value ||
