@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export const GET = withErrorHandler(async (request) => {
-  await requireAuth(request);
+  await requireAdmin(request);
   initFirebaseAdmin();
   const db = getFirestore();
 
@@ -88,10 +88,6 @@ export const POST = withErrorHandler(async (request) => {
   }
 
   const body = await parseJSON(request);
-
-  if (!body || !body.parentEmail || !body.studentEmail) {
-    return jsonError("Parent and student emails are required", 400);
-  }
 
   const validation = parentStudentLinkSchema.safeParse(body);
   if (!validation.success) {
@@ -234,19 +230,20 @@ export const DELETE = withErrorHandler(async (request) => {
     studentId: url.searchParams.get("studentId"),
   };
 
-  if (!queryParams.parentId || !queryParams.studentId) {
-    return jsonError("Missing parentId or studentId parameters", 400);
-  }
-
   const validation = deleteParentStudentLinkSchema.safeParse(queryParams);
   if (!validation.success) {
-    return jsonError({
-      message: "Validation failed",
-      details: (validation.error.errors || validation.error.issues || []).map((issue) => ({
-        path: issue.path ? issue.path.join(".") : "",
-        message: issue.message || "Invalid input",
-      })),
-    }, 400);
+    return jsonError(
+      {
+        message: "Validation failed",
+        details: (validation.error.errors || validation.error.issues || []).map(
+          (issue) => ({
+            path: issue.path ? issue.path.join(".") : "",
+            message: issue.message || "Invalid input",
+          })
+        ),
+      },
+      400
+    );
   }
 
   const { parentId, studentId } = validation.data;
